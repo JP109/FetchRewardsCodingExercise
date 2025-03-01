@@ -1,36 +1,49 @@
 package me.jaipawar.fetchcodingexercise;
 
+import android.content.SharedPreferences;
 import android.os.Bundle;
-import android.util.Log;
 import android.view.View;
-import android.widget.ProgressBar;
+import android.view.Menu;
+import android.view.MenuItem;
+import androidx.annotation.NonNull;
+import android.view.MenuInflater;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.app.AppCompatDelegate;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+import android.widget.ProgressBar;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
-
-
 import retrofit2.Call;
 import retrofit2.Callback;
 import retrofit2.Response;
 import retrofit2.Retrofit;
 import retrofit2.converter.gson.GsonConverterFactory;
 import retrofit2.http.GET;
+import android.util.Log;
 
 public class MainActivity extends AppCompatActivity {
 
-    public static final String BASE_URL = "https://fetch-hiring.s3.amazonaws.com/";
     private RecyclerView recyclerView;
     private ItemAdapter itemAdapter;
     private ProgressBar progressBar;
     private List<Item> itemList = new ArrayList<>();
+    private SharedPreferences sharedPreferences;
+
+    public static final String BASE_URL = "https://fetch-hiring.s3.amazonaws.com/";
 
     @Override
-    protected void onCreate(@Nullable Bundle savedInstanceState) {
+    protected void onCreate(Bundle savedInstanceState) {
+        // Load saved theme preference
+        sharedPreferences = getSharedPreferences("AppSettings", MODE_PRIVATE);
+        boolean isDarkMode = sharedPreferences.getBoolean("dark_mode", false);
+        AppCompatDelegate.setDefaultNightMode(isDarkMode ?
+                AppCompatDelegate.MODE_NIGHT_YES :
+                AppCompatDelegate.MODE_NIGHT_NO);
+
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
@@ -51,7 +64,9 @@ public class MainActivity extends AppCompatActivity {
                 if (response.isSuccessful() && response.body() != null) {
                     itemList = response.body();
                     itemList.removeIf(item -> item.getName() == null || item.getName().trim().isEmpty());
-                    Collections.sort(itemList, Comparator.comparing(Item::getListId).thenComparing(Item::getName));
+                    itemList.sort(Comparator.comparingInt(Item::getListId)
+                            .thenComparing(item -> extractNumericValue(item.getName()))
+                            .thenComparing(Item::getName, String.CASE_INSENSITIVE_ORDER));
                     itemAdapter = new ItemAdapter(itemList);
                     recyclerView.setAdapter(itemAdapter);
                 }
@@ -60,10 +75,56 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onFailure(Call<List<Item>> call, Throwable t) {
-                Log.e("MainActivity", "Error fetching JSON" + t.getMessage(), t);
                 progressBar.setVisibility(View.GONE);
             }
         });
+    }
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        MenuInflater inflater = getMenuInflater();
+        inflater.inflate(R.menu.menu_main, menu);
+
+        // Set the correct title based on the current mode
+        MenuItem toggleItem = menu.findItem(R.id.action_toggle_darkmode);
+        boolean isDarkMode = sharedPreferences.getBoolean("dark_mode", false);
+        toggleItem.setTitle(isDarkMode ? "Toggle Light Mode" : "Toggle Dark Mode");
+
+        return true;
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(@NonNull MenuItem item) {
+        if (item.getItemId() == R.id.action_toggle_darkmode) {
+            boolean isDarkMode = sharedPreferences.getBoolean("dark_mode", false);
+
+            // Toggle and save preference
+            SharedPreferences.Editor editor = sharedPreferences.edit();
+            editor.putBoolean("dark_mode", !isDarkMode);
+            editor.apply();
+
+            // Apply the theme and restart activity
+            AppCompatDelegate.setDefaultNightMode(isDarkMode ?
+                    AppCompatDelegate.MODE_NIGHT_NO :
+                    AppCompatDelegate.MODE_NIGHT_YES);
+
+            recreate(); // Restart activity to apply changes
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
+    private int extractNumericValue(String name) {
+        try {
+            // Extract first number found in the string
+            java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\d+").matcher(name);
+            if (matcher.find()) {
+                return Integer.parseInt(matcher.group());
+            }
+        } catch (NumberFormatException e) {
+            Log.e("SortingError", "Failed to extract number from: " + name);
+        }
+        return Integer.MAX_VALUE; // If no number found, push it to the end
     }
 }
 
